@@ -1,0 +1,106 @@
+{
+  "types": {
+    "dynatrace.datasource.python:custom_huawei_campusinsight-endpoint": {
+      "type": "object",
+      "displayName": "Huawei CampusInsight base URL",
+      "summaryPattern": "Huawei CampusInsight {url}",
+      "properties": {
+        "url": {
+          "displayName": "URL",
+          "type": "text",
+          "description": "Base URL for CampusInsight (eg: https://<IP-addr>:<port>)",
+          "nullable": false,
+          "default": "",
+          "constraints": [
+            {
+              "type": "LENGTH",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          ]
+        },
+        "tenantID": {
+          "displayName": "Tenant ID",
+          "type": "text",
+          "description": "Huawei iMaster's tenant ID",
+          "nullable": false,
+          "default": "",
+          "constraints": [
+            {
+              "type": "LENGTH",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          ]
+        },
+        "username": {
+          "displayName": "iMaster Username",
+          "type": "text",
+          "description": "Username used to log into iMaster",
+          "nullable": false,
+          "default": "",
+          "constraints": [
+            {
+              "type": "LENGTH",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          ]
+        },
+        "password": {
+          "displayName": "iMaster Password",
+          "type": "secret",
+          "description": "Password used to log into iMaster",
+          "nullable": false,
+          "default": "",
+          "constraints": [
+            {
+              "type": "LENGTH",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          ]
+        }
+      }
+    },
+    "pythonRemote": {
+      "type": "object",
+      "properties": {
+        "endpoints": {
+          "displayName": "Huawei CampusInsight endpoints",
+          "type": "list",
+          "items": {
+            "type": {
+              "$ref": "#/types/dynatrace.datasource.python:custom_huawei_campusinsight-endpoint"
+            }
+          },
+          "nullable": false,
+          "minItems": 1,
+          "maxItems": 100,
+          "metaData": {
+            "addItemButton": "Add endpoint"
+          }
+        }
+      }
+    }
+  },
+  "dynatrace": "1",
+  "schemaId": "python-extension.activation",
+  "displayName": "Huawei CampusInsight configuration",
+  "description": "Configuration for the Huawei CampusInsight Python extension.",
+  "ownerProductManagement": "dynatrace",
+  "ownerDevelopment": "GENERAL_AVAILABILITY",
+  "maturity": "GENERAL_AVAILABILITY",
+  "allowedScopes": [
+    "environment"
+  ],
+  "multiObject": false,
+  "properties": {
+    "pythonRemote": {
+      "displayName": "Python Remote Extension",
+      "type": {
+        "$ref": "#/types/pythonRemote"
+      }
+    }
+  }
+}

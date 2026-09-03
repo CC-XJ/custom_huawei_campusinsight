@@ -1,0 +1,205 @@
+name: custom:com.cc.ext.huawei.campusinsight
+version: 0.0.2
+minDynatraceVersion: 1.345.0
+author:
+  name: Core Consulting
+
+python:
+  runtime:
+    module: custom_huawei_campusinsight
+    version:
+      min: "3.14"
+  activation:
+    remote:
+      path: activationSchema.json
+
+  featureSets:
+    - featureSet: network_telemetry
+      metrics:
+        - key: custom.huawei.campusinsight.board.cpu.usage
+        - key: custom.huawei.campusinsight.board.cpu.usage.max
+
+    - featureSet: network_health
+      metrics:
+        - key: custom.huawei.campusinsight.health.total_rate
+        - key: custom.huawei.campusinsight.health.rate
+        - key: custom.huawei.campusinsight.health.success_connection
+        - key: custom.huawei.campusinsight.health.time_consumption
+        - key: custom.huawei.campusinsight.health.roaming
+        - key: custom.huawei.campusinsight.health.coverage
+        - key: custom.huawei.campusinsight.health.capacity
+        - key: custom.huawei.campusinsight.health.throughput
+
+metrics:
+  - key: custom.huawei.campusinsight.board.cpu.usage
+    metadata:
+      displayName: Board CPU Usage
+      description: Current CPU usage for Huawei board devices returned by the CampusInsight topn API.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+        - key: device_name
+          displayName: Device Name
+        - key: device_ip
+          displayName: Device IP
+        - key: board_id
+          displayName: Board ID
+
+  - key: custom.huawei.campusinsight.board.cpu.usage.max
+    metadata:
+      displayName: Board CPU Usage Maximum
+      description: Maximum CPU usage observed for Huawei board devices returned by the CampusInsight topn API.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+        - key: device_name
+          displayName: Device Name
+        - key: device_ip
+          displayName: Device IP
+        - key: board_id
+          displayName: Board ID
+  
+  - key: custom.huawei.campusinsight.health.total_rate
+    metadata:
+      displayName: Network Health Total Rate
+      description: Overall network health score for the WLAN, aggregated across all health-degree components.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+
+  - key: custom.huawei.campusinsight.health.rate
+    metadata:
+      displayName: Network Health Rate
+      description: Current health rate value from the CampusInsight health-degree API.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+
+  - key: custom.huawei.campusinsight.health.success_connection
+    metadata:
+      displayName: Success Connection Rate
+      description: Percentage of successful connection attempts, from the succesCon field of the health-degree API.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+
+  - key: custom.huawei.campusinsight.health.time_consumption
+    metadata:
+      displayName: Access Time Consumption
+      description: Access time consumption score from the timeCon field of the health-degree API.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+
+  - key: custom.huawei.campusinsight.health.roaming
+    metadata:
+      displayName: Roaming Health
+      description: Roaming health-degree score.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+
+  - key: custom.huawei.campusinsight.health.coverage
+    metadata:
+      displayName: Coverage Health
+      description: Signal coverage health-degree score.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+
+  - key: custom.huawei.campusinsight.health.capacity
+    metadata:
+      displayName: Capacity Health
+      description: Network capacity health-degree score.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+
+  - key: custom.huawei.campusinsight.health.throughput
+    metadata:
+      displayName: Throughput Health
+      description: Throughput health-degree score.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+
+topology:
+  types:
+    - enabled: true
+      name: "campusinsight:device"
+      displayName: "Huawei CampusInsight Device"
+      rules:
+        - idPattern: "iMaster_Device_{tenant_id}_{device_name}"
+          instanceNamePattern: "{device_name}"
+          attributes:
+            - key: tenant_id
+              displayName: Tenant ID
+              pattern: "{tenant_id}"
+            - key: device_name
+              displayName: Device Name
+              pattern: "{device_name}"
+            - key: device_ip
+              displayName: Device IP
+              pattern: "{device_ip}"
+          sources:
+            - sourceType: Metrics
+              condition: $prefix(custom.huawei.campusinsight.board.)
+
+    - enabled: true
+      name: "campusinsight:board"
+      displayName: "Huawei CampusInsight Board"
+      rules:
+        - idPattern: "iMaster_Board_{board_id}"
+          instanceNamePattern: "{device_name} - {board_id}"
+          attributes:
+            - key: device_name
+              displayName: Device Name
+              pattern: "{device_name}"
+            - key: device_ip
+              displayName: Device IP
+              pattern: "{device_ip}"
+            - key: board_id
+              displayName: Board ID
+              pattern: "{board_id}"
+          sources:
+            - sourceType: Metrics
+              condition: $prefix(custom.huawei.campusinsight.board.)
+      
+    - enabled: true
+      name: "campusinsight:tenant"
+      displayName: "Huawei CampusInsight Tenant"
+      rules:
+        - idPattern: "iMaster_Tenant_{tenant_id}"
+          instanceNamePattern: "Tenant {tenant_id}"
+          attributes:
+            - key: tenant_id
+              displayName: Tenant ID
+              pattern: "{tenant_id}"
+          sources:
+            - sourceType: Metrics
+              condition: $prefix(custom.huawei.campusinsight.health.)
+
+  relationships:
+    - fromType: "campusinsight:board"
+      toType: "campusinsight:device"
+      typeOfRelation: CHILD_OF 
+      sources:
+        - sourceType: Metrics
+          condition: $prefix(custom.huawei.campusinsight.board.)
+
+    - fromType: "campusinsight:device"
+      toType: "campusinsight:tenant"
+      typeOfRelation: CHILD_OF
+      sources:
+        - sourceType: Metrics
+          condition: $prefix(custom.huawei.campusinsight.board.)

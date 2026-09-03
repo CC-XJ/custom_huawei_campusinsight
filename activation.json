@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "description": "custom_huawei_campusinsight activation",
+  "version": "0.0.1",
+  "activationContext": "REMOTE",
+  "pythonRemote": {
+    "endpoints": [
+      {
+        "url": "https://10.220.33.10:26335",
+        "tenantID": "{{huawei_campusinsight_tenantID}}",
+        "username": "{{huawei_campusinsight_username}}",
+        "password": "{{huawei_campusinsight_password}}"
+      }
+    ]
+  }
+}
