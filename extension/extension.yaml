@@ -1,6 +1,6 @@
 name: custom:com.cc.ext.huawei.campusinsight
-version: 0.0.2
-minDynatraceVersion: 1.345.0
+version: 0.0.4
+minDynatraceVersion: 1.343.0
 author:
   name: Core Consulting
 
@@ -64,7 +64,7 @@ metrics:
   - key: custom.huawei.campusinsight.health.total_rate
     metadata:
       displayName: Network Health Total Rate
-      description: Overall network health score for the WLAN, aggregated across all health-degree components.
+      description: Overall WLAN network health score for the tenant, aggregated across all health-degree components and returned in the totalRate field by the CampusInsight health API.
       unit: Percent
       dimensions:
         - key: tenant_id
@@ -73,7 +73,7 @@ metrics:
   - key: custom.huawei.campusinsight.health.rate
     metadata:
       displayName: Network Health Rate
-      description: Current health rate value from the CampusInsight health-degree API.
+      description: Overall network health rate for the tenant, returned in the rate field of the CampusInsight health API. This metric is declared by the extension but is not currently reported by the runtime.
       unit: Percent
       dimensions:
         - key: tenant_id
@@ -82,7 +82,7 @@ metrics:
   - key: custom.huawei.campusinsight.health.success_connection
     metadata:
       displayName: Success Connection Rate
-      description: Percentage of successful connection attempts, from the succesCon field of the health-degree API.
+      description: Percentage of successful wireless connection attempts for the tenant, returned in the succesCon field of the CampusInsight health API. This metric is declared by the extension but is not currently reported by the runtime.
       unit: Percent
       dimensions:
         - key: tenant_id
@@ -91,7 +91,7 @@ metrics:
   - key: custom.huawei.campusinsight.health.time_consumption
     metadata:
       displayName: Access Time Consumption
-      description: Access time consumption score from the timeCon field of the health-degree API.
+      description: Access time consumption health score for the tenant, returned in the timeCon field of the CampusInsight health API. This metric is declared by the extension but is not currently reported by the runtime.
       unit: Percent
       dimensions:
         - key: tenant_id
@@ -100,7 +100,7 @@ metrics:
   - key: custom.huawei.campusinsight.health.roaming
     metadata:
       displayName: Roaming Health
-      description: Roaming health-degree score.
+      description: Wireless client roaming health score for the tenant, returned in the roaming field of the CampusInsight health API. This metric is declared by the extension but is not currently reported by the runtime.
       unit: Percent
       dimensions:
         - key: tenant_id
@@ -109,7 +109,7 @@ metrics:
   - key: custom.huawei.campusinsight.health.coverage
     metadata:
       displayName: Coverage Health
-      description: Signal coverage health-degree score.
+      description: Wireless signal coverage health score for the tenant, returned in the coverage field of the CampusInsight health API.
       unit: Percent
       dimensions:
         - key: tenant_id
@@ -118,7 +118,7 @@ metrics:
   - key: custom.huawei.campusinsight.health.capacity
     metadata:
       displayName: Capacity Health
-      description: Network capacity health-degree score.
+      description: Network capacity health score for the tenant, returned in the capacity field of the CampusInsight health API.
       unit: Percent
       dimensions:
         - key: tenant_id
@@ -127,7 +127,7 @@ metrics:
   - key: custom.huawei.campusinsight.health.throughput
     metadata:
       displayName: Throughput Health
-      description: Throughput health-degree score.
+      description: Network throughput health score for the tenant, returned in the throughput field of the CampusInsight health API.
       unit: Percent
       dimensions:
         - key: tenant_id

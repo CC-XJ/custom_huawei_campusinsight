@@ -1,104 +1,48 @@
-# Huawei CampusInsight Dynatrace Extension
+# custom:com.cc.ext.huawei.campusinsight
 
-A Dynatrace custom extension for collecting operational telemetry from Huawei iMaster CampusInsight and feeding it into Dynatrace as custom metrics and topology data.
+**Latest version:** 0.0.4
+This extension is built using the Dynatrace Extension 2.0 Framework.
+This means it will benefit of additional assets that can help you browse through the data.
 
-This extension connects to the CampusInsight API, authenticates against the Huawei iMaster instance, gathers board-level CPU usage and network health indicators, and reports them as Dynatrace custom metrics with tenant, device, and board dimensions.
+## Topology
 
-## Overview
+This extension will create the following types of entities:
+* Huawei CampusInsight Device (campusinsight:device)
+* Huawei CampusInsight Board (campusinsight:board)
+* Huawei CampusInsight Tenant (campusinsight:tenant)
 
-The extension is designed for environments where Huawei CampusInsight is used to monitor WLAN and campus network health. It periodically queries:
+## Metrics
 
-- Board performance data from the CampusInsight TopN API
-- Network health and quality metrics from the CampusInsight health-degree API
-- Tenant, device, and board relationships for topology modeling in Dynatrace
+This extension will collect the following metrics:
+* Split by Huawei CampusInsight Device, Huawei CampusInsight Board:
+  * Board CPU Usage (`custom.huawei.campusinsight.board.cpu.usage`)
+    Current CPU usage for Huawei board devices returned by the CampusInsight topn API. (as Percent)
+  * Board CPU Usage Maximum (`custom.huawei.campusinsight.board.cpu.usage.max`)
+    Maximum CPU usage observed for Huawei board devices returned by the CampusInsight topn API. (as Percent)
+* Split by Huawei CampusInsight Tenant:
+  * Network Health Total Rate (`custom.huawei.campusinsight.health.total_rate`)
+    Overall network health score for the WLAN, aggregated across all health-degree components. (as Percent)
+  * Network Health Rate (`custom.huawei.campusinsight.health.rate`)
+    Current health rate value from the CampusInsight health-degree API. (as Percent)
+  * Success Connection Rate (`custom.huawei.campusinsight.health.success_connection`)
+    Percentage of successful connection attempts, from the succesCon field of the health-degree API. (as Percent)
+  * Access Time Consumption (`custom.huawei.campusinsight.health.time_consumption`)
+    Access time consumption score from the timeCon field of the health-degree API. (as Percent)
+  * Roaming Health (`custom.huawei.campusinsight.health.roaming`)
+    Roaming health-degree score. (as Percent)
+  * Coverage Health (`custom.huawei.campusinsight.health.coverage`)
+    Signal coverage health-degree score. (as Percent)
+  * Capacity Health (`custom.huawei.campusinsight.health.capacity`)
+    Network capacity health-degree score. (as Percent)
+  * Throughput Health (`custom.huawei.campusinsight.health.throughput`)
+    Throughput health-degree score. (as Percent)
 
-It is implemented as a remote Python extension for Dynatrace and is intended for use in environments where the Huawei platform exposes a self-signed certificate and requires token-based authentication.
+# Configuration
 
-## What it collects
+## Feature sets
 
-### Board CPU metrics
-The extension filters for HQ core/top switch devices and exports CPU usage metrics for matching boards.
+Feature sets can be used to opt in and out of metric data collection.
+This extension groups together metrics within the following feature sets:
 
-- custom.huawei.campusinsight.board.cpu.usage
-- custom.huawei.campusinsight.board.cpu.usage.max
-
-Dimensions:
-- tenant_id
-- device_name
-- device_ip
-- board_id
-
-### Network health metrics
-The extension also reports health indicators for the tenant.
-
-- custom.huawei.campusinsight.health.total_rate
-- custom.huawei.campusinsight.health.rate
-- custom.huawei.campusinsight.health.coverage
-- custom.huawei.campusinsight.health.capacity
-- custom.huawei.campusinsight.health.throughput
-
-These metrics are grouped by tenant and give visibility into overall network health and experience quality.
-
-## Architecture
-
-The project includes:
-
-- A Dynatrace extension definition in [extension/extension.yaml](extension/extension.yaml)
-- Activation schema for remote endpoint configuration in [extension/activationSchema.json](extension/activationSchema.json)
-- The Python extension implementation in [custom_huawei_campusinsight/__main__.py](custom_huawei_campusinsight/__main__.py)
-- Package metadata in [setup.py](setup.py)
-
-The Python code:
-
-1. Reads the configured CampusInsight endpoints from the Dynatrace activation config.
-2. Logs in using the Huawei OAuth token endpoint.
-3. Caches access sessions to avoid repeated logins.
-4. Pulls board CPU and health data for recent time windows.
-5. Converts values to Dynatrace custom metrics.
-6. Publishes topology for tenant, device, and board entities.
-
-## Configuration
-
-The extension expects one or more CampusInsight endpoints with the following fields:
-
-- url
-- tenantID
-- username
-- password
-
-## Installation and local development
-
-Install the package in editable mode:
-
-```bash
-python -m pip install --upgrade pip
-python -m pip install -e .
-```
-
-The package requires Python 3.10+ and the Dynatrace extension SDK:
-
-```bash
-pip install "dt-extensions-sdk>=1.8.0"
-```
-
-## Running the extension
-
-The project is designed to run as a Dynatrace remote extension, not as a standalone app. The entry point is:
-
-```bash
-python -m custom_huawei_campusinsight
-```
-
-This executes the extension logic and schedules the polling routines for CampusInsight telemetry collection.
-
-## Notes
-
-- Session tokens are cached and refreshed before expiry.
-- API requests use a short lookback window to keep metric collection focused and current.
-- Board filtering is intentionally narrow and targets HQ CSW/TSW devices to reduce noise.
-- The extension is aimed at Huawei iMaster CampusInsight operational monitoring use cases.
-
-## Project status
-
-This project is a custom monitoring extension for Dynatrace and is currently tailored to Huawei CampusInsight data collection patterns.
+* default
 

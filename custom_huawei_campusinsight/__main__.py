@@ -14,7 +14,8 @@ _INSECURE_SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
 _EXPIRY_BUFFER_SECONDS = 60
 
-LOOKBACK_MINUTES = 15
+TELEMETRY_OFFSET = 15
+HEALTH_OFFSET = 210
 LOGIN_PATH = "/rest/plat/smapp/v1/oauth/token"
 TOPN_PATH = "/rest/pmservice/v2/openapi/topn"
 HEALTH_PATH = "/rest/campuswlanqualityservice/v1/expmonitor/overview/rate"
@@ -24,15 +25,13 @@ class ExtensionImpl(Extension):
     def initialize(self):
         self.extension_name = "custom_huawei_campusinsight"
         self._session_cache: dict[str, tuple[str, datetime]] = {} # base_url -> (access_session, expires_at)
-        self.schedule(self.query_campusinsight, timedelta(minutes=LOOKBACK_MINUTES))
-
+        self.schedule(self.query_campusinsight, timedelta(minutes=1))
 
     def query_campusinsight(self):
         self.logger.info("Running Huawei CampusInsight query.")
 
         for endpoint in self.activation_config["endpoints"]:
             self._query_endpoint(endpoint)
-
 
     def _query_endpoint(self, endpoint: dict[str, Any]):
         base_url = endpoint.get("url", "").strip("/")
@@ -57,12 +56,6 @@ class ExtensionImpl(Extension):
         try:
             access_session = self._get_session(base_url, username, password)
 
-            self.logger.info(
-                "Login succeeded for %s (session starts with %s...)",
-                base_url,
-                access_session[:8],
-            )
-
         except error.URLError as exc:
             self.logger.error("Login to %s failed: %s", base_url, exc)
             return
@@ -75,10 +68,6 @@ class ExtensionImpl(Extension):
         # 【Extract Telemetry】 Fetch Huawei iMaster CPU Usage (Telemetry)
         try:
             resultData = self._fetch_board_cpu_usage(base_url, access_session)
-
-            self.logger.info(
-                "CPU usage fetch succeeded for %s (%d rows)", base_url, len(resultData)
-            )
 
             # 【Report Telemetry】Report fetched telemtry metrics to Dynatrace
             for row in resultData:
@@ -93,8 +82,6 @@ class ExtensionImpl(Extension):
         # 【Extract Health】 Fetch Huawei iMaster Network Health
         try:
             health_data = self._fetch_network_health(base_url, access_session, tenant_id)
-
-            self.logger.info("Health fetch succeeded for %s", base_url)
 
             # 【Report Health】Report fetched network health metrics to Dynatrace
             self._report_health(health_data, tenant_id)
@@ -141,6 +128,12 @@ class ExtensionImpl(Extension):
         if not expires_in:
             raise RuntimeError(f"Login response did not include expires: {resBody}")
 
+        self.logger.info(
+            "Login succeeded for %s (session starts with %s...)",
+            f"{base_url}{LOGIN_PATH}",
+            access_session[:8],
+        )
+
         return access_session, expires_in
 
     def _get_session(self, base_url: str, username: str, password: str) -> str:
@@ -150,17 +143,22 @@ class ExtensionImpl(Extension):
         if cached:
             access_session, expires_at = cached
             if datetime.now(timezone.utc) < expires_at:
+                self.logger.info(
+                    "Existing session found (session starts with %s...)",
+                    access_session[:8],
+                )
                 return access_session
 
         # If token doesn't exist or expired, call login method
         access_session, expires_in = self._login(base_url, username, password)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds = max(expires_in - _EXPIRY_BUFFER_SECONDS, 0))
         self._session_cache[base_url] = (access_session, expires_at)
+        
         return access_session
 
     def _fetch_board_cpu_usage(self, base_url: str, access_session: str) -> list[dict[str, Any]]:
         now = datetime.now(timezone.utc)
-        begin = now - timedelta(minutes=LOOKBACK_MINUTES)
+        begin = now - timedelta(minutes=TELEMETRY_OFFSET)
 
         # 【Set Parameter】Condition parameter for Huawei iMaster CPU Usage endpoint
         condition = {
@@ -169,7 +167,7 @@ class ExtensionImpl(Extension):
             "beginTime": int(begin.timestamp() * 1000),
             "endTime": int(now.timestamp() * 1000),
             "isAbnormal": False,
-            "limit": 1000, 
+            "limit": 150, 
             "filters": {"id": ["/"], "level": [0], "dcn_filter_ne_name": ["HQ"],},
             "supportOperate": [],
         }
@@ -209,6 +207,10 @@ class ExtensionImpl(Extension):
         self.logger.debug(
             "CampusInsight %s: %d/%d boards matches HQ+CSW/TSW filter",
             base_url, len(filtered_resultData), len(resultData),
+        )
+
+        self.logger.info(
+            "CPU usage fetch succeeded for %s (%d rows)", f"{base_url}{TOPN_PATH}", len(filtered_resultData)
         )
         
         return filtered_resultData
@@ -261,7 +263,7 @@ class ExtensionImpl(Extension):
 
     def _fetch_network_health(self, base_url: str, access_session: str, tenant_id: str) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
-        begin = now - timedelta(minutes=LOOKBACK_MINUTES)
+        begin = now - timedelta(minutes=HEALTH_OFFSET)
 
         parameter = {
             "id": "/",
@@ -290,6 +292,8 @@ class ExtensionImpl(Extension):
         if json_resBody.get("resultCode") not in (None, 0, "0"):
             raise RuntimeError(f"CampusInsight health API error: {json_resBody.get('errorDes')}")
 
+        self.logger.info("Health fetch succeeded for %s", f"{base_url}{HEALTH_PATH}")
+
         return json_resBody.get("data", {})
 
     def _report_health(self, health_data: dict[str, Any], tenant_id: str):
@@ -299,7 +303,8 @@ class ExtensionImpl(Extension):
 
         field_map = {
             "custom.huawei.campusinsight.health.total_rate": (health_data, "totalRate"),
-            "custom.huawei.campusinsight.health.rate": (values, "rate"),
+            # Not required for draft version
+            # "custom.huawei.campusinsight.health.rate": (values, "rate"),
             # "custom.huawei.campusinsight.health.success_connection": (values, "succesCon"),
             # "custom.huawei.campusinsight.health.time_consumption": (values, "timeCon"),
             # "custom.huawei.campusinsight.health.roaming": (values, "roaming"),
@@ -320,7 +325,6 @@ class ExtensionImpl(Extension):
 
             except (TypeError, ValueError):
                 self.logger.warning("Non-numeric %s for tenant %s: %r", field, tenant_id, raw_value)
-
 
     def fastcheck(self):
         return Status(StatusValue.OK)
