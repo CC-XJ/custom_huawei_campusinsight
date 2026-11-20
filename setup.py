@@ -24,7 +24,7 @@ setup(
     description="Dynatrace extension for Huawei CampusInsight",
     author="Core Consulting",
     packages=find_packages(),
-    python_requires=">=3.10",
+    python_requires=">=3.14",
     include_package_data=True,
     install_requires=["dt-extensions-sdk>=1.8.0"],
     extras_require={"dev": ["dt-extensions-sdk[cli]"]},
