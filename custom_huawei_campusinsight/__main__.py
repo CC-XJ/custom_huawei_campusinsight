@@ -16,6 +16,7 @@ _EXPIRY_BUFFER_SECONDS = 60
 
 TELEMETRY_OFFSET = 15
 HEALTH_OFFSET = 210
+HEALTH_REPORT_OFFSET = 50
 LOGIN_PATH = "/rest/plat/smapp/v1/oauth/token"
 TOPN_PATH = "/rest/pmservice/v2/openapi/topn"
 HEALTH_PATH = "/rest/campuswlanqualityservice/v1/expmonitor/overview/rate"
@@ -24,7 +25,8 @@ HEALTH_PATH = "/rest/campuswlanqualityservice/v1/expmonitor/overview/rate"
 class ExtensionImpl(Extension):
     def initialize(self):
         self.extension_name = "custom_huawei_campusinsight"
-        self._session_cache: dict[str, tuple[str, datetime]] = {} # base_url -> (access_session, expires_at)
+        self._session_cache: dict[tuple[str, str], tuple[str, datetime]] = {} # (base_url, username) -> (access_session, expires_at)
+
         self.schedule(self.query_campusinsight, timedelta(minutes=1))
 
     def query_campusinsight(self):
@@ -39,15 +41,13 @@ class ExtensionImpl(Extension):
         username = endpoint.get("username", "").strip()
         password = endpoint.get("password", "").strip()
 
-        # 【Guardrail】 Check for empty input fields
+        # 【Input Check】 Check for empty input fields
         if not base_url:
             self.logger.warning("Skipping endpoint without a URL")
             return
-
         if not tenant_id:
             self.logger.warning("Skipping endpoint %s without a tenant ID", base_url)
-            return
-        
+            return      
         if not username or not password:
             self.logger.warning("Skipping endpoint %s without a username/password.", base_url)
             return
@@ -55,45 +55,36 @@ class ExtensionImpl(Extension):
         # 【Get Access Token】Call method to obtain access session token
         try:
             access_session = self._get_session(base_url, username, password)
-
-        except error.URLError as exc:
-            self.logger.error("Login to %s failed: %s", base_url, exc)
-            return
-        
+            
         except Exception as exc:
-            self.logger.error("Unexpected error logging into %s: %s", base_url, exc)
+            self.logger.error("Could not obtain session for %s: %s", base_url, exc)
             return
-
 
         # 【Extract Telemetry】 Fetch Huawei iMaster CPU Usage (Telemetry)
         try:
-            resultData = self._fetch_board_cpu_usage(base_url, access_session)
+            resultData, telemetry_timestamp = self._fetch_board_cpu_usage(base_url, access_session)
 
             # 【Report Telemetry】Report fetched telemtry metrics to Dynatrace
             for row in resultData:
-                self._report_telemetry(row, tenant_id)
-
-        except error.URLError as exc:
-            self.logger.error("Request to %s failed: %s", base_url, exc)
+                self._report_telemetry(row, tenant_id, telemetry_timestamp)
 
         except Exception as exc:
-            self.logger.error("Unexpected error querying %s: %s", base_url, exc)
+            self.logger.error("Error fetching/reporting telemetry for %s: %s", base_url, exc)
 
         # 【Extract Health】 Fetch Huawei iMaster Network Health
         try:
-            health_data = self._fetch_network_health(base_url, access_session, tenant_id)
+            health_data, health_timestamp = self._fetch_network_health(base_url, access_session, tenant_id)
 
             # 【Report Health】Report fetched network health metrics to Dynatrace
-            self._report_health(health_data, tenant_id)
-
-        except error.URLError as exc:
-            self.logger.error("Health request to %s failed: %s", base_url, exc)
+            self._report_health(health_data, tenant_id, health_timestamp)
 
         except Exception as exc:
-            self.logger.error("Unexpected error querying health for %s: %s", base_url, exc)
+            self.logger.error("Error fetching/reporting telemetry for %s: %s", base_url, exc)
+
 
     def _login(self, base_url: str, username: str, password: str) -> tuple[str, int]:
 
+        # Prepare request body
         reqData = json.dumps({
             "grantType": "password",
             "userName": username,
@@ -112,6 +103,7 @@ class ExtensionImpl(Extension):
             method="PUT"
         )
 
+        # Call Authentication Endpoint
         try:
             with request.urlopen(req, timeout=30, context=_INSECURE_SSL_CONTEXT) as response:
                 resBody = json.loads(response.read())
@@ -137,9 +129,10 @@ class ExtensionImpl(Extension):
         return access_session, expires_in
 
     def _get_session(self, base_url: str, username: str, password: str) -> str:
-        cached = self._session_cache.get(base_url)
+        cache_key = (base_url, username)
+        cached = self._session_cache.get(cache_key)
 
-        # Return session token if it's still valid
+        # Reuse cached session token 
         if cached:
             access_session, expires_at = cached
             if datetime.now(timezone.utc) < expires_at:
@@ -149,18 +142,24 @@ class ExtensionImpl(Extension):
                 )
                 return access_session
 
-        # If token doesn't exist or expired, call login method
+        # Call Login method if cached token expired/null
         access_session, expires_in = self._login(base_url, username, password)
+
+        # Set the token expiry date
         expires_at = datetime.now(timezone.utc) + timedelta(seconds = max(expires_in - _EXPIRY_BUFFER_SECONDS, 0))
-        self._session_cache[base_url] = (access_session, expires_at)
+
+        # Cache the token
+        self._session_cache[cache_key] = (access_session, expires_at)
         
         return access_session
 
-    def _fetch_board_cpu_usage(self, base_url: str, access_session: str) -> list[dict[str, Any]]:
+    def _fetch_board_cpu_usage(
+        self, base_url: str, access_session: str
+    ) -> tuple[list[dict[str, Any]], datetime]:
         now = datetime.now(timezone.utc)
         begin = now - timedelta(minutes=TELEMETRY_OFFSET)
 
-        # 【Set Parameter】Condition parameter for Huawei iMaster CPU Usage endpoint
+        # 【Set Parameter】Condition parameter for TOPN endpoint
         condition = {
             "measureUnit": "dcn_board",
             "measure": "dcn_board_cpu_usage",
@@ -182,8 +181,13 @@ class ExtensionImpl(Extension):
 
         req = request.Request(full_url, headers=headers, method="GET")
 
-        with request.urlopen(req, timeout=30, context=_INSECURE_SSL_CONTEXT) as response:
-            resBody = response.read()
+        try:
+            with request.urlopen(req, timeout=30, context=_INSECURE_SSL_CONTEXT) as response:
+                resBody = response.read()
+        except error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            self.logger.error("TopN request HTTP %s: %s", e.code, body)
+            raise
 
         json_resBody = json.loads(resBody)
 
@@ -213,7 +217,7 @@ class ExtensionImpl(Extension):
             "CPU usage fetch succeeded for %s (%d rows)", f"{base_url}{TOPN_PATH}", len(filtered_resultData)
         )
         
-        return filtered_resultData
+        return filtered_resultData, begin
 
     def _filter_device_name(self, name: str) -> bool:
         """Return True if the device is an HQ core/top switch (CSW or TSW)."""
@@ -221,7 +225,7 @@ class ExtensionImpl(Extension):
 
         return "HQ" in name and ("CSW" in name or "TSW" in name)
 
-    def _report_telemetry(self, row: dict[str, Any], tenant_id: str):
+    def _report_telemetry(self, row: dict[str, Any], tenant_id: str, timestamp: datetime):
         raw_id = row.get("id", "")
 
         if not raw_id:
@@ -243,7 +247,8 @@ class ExtensionImpl(Extension):
                 self.report_metric(
                     "custom.huawei.campusinsight.board.cpu.usage",
                     float(meas_value),
-                    dimensions = dimensions
+                    dimensions=dimensions,
+                    timestamp=timestamp,
                 )
             except (TypeError, ValueError):
                 self.logger.warning("Non-numeric meas_value for board %s: %r", raw_id, meas_value)
@@ -257,11 +262,14 @@ class ExtensionImpl(Extension):
                     "custom.huawei.campusinsight.board.cpu.usage.max",
                     float(maximum),
                     dimensions=dimensions,
+                    timestamp=timestamp,
                 )
             except (TypeError, ValueError):
                 self.logger.warning("Non-numeric maximum for board %s: %r", raw_id, maximum)
 
-    def _fetch_network_health(self, base_url: str, access_session: str, tenant_id: str) -> dict[str, Any]:
+    def _fetch_network_health(
+        self, base_url: str, access_session: str, tenant_id: str
+    ) -> tuple[dict[str, Any], datetime]:
         now = datetime.now(timezone.utc)
         begin = now - timedelta(minutes=HEALTH_OFFSET)
 
@@ -294,9 +302,12 @@ class ExtensionImpl(Extension):
 
         self.logger.info("Health fetch succeeded for %s", f"{base_url}{HEALTH_PATH}")
 
-        return json_resBody.get("data", {})
+        # Set timeframe to be ingested into dynatrace. (now - 50 minutes)
+        report_timestamp = now - timedelta(minutes=HEALTH_REPORT_OFFSET)
 
-    def _report_health(self, health_data: dict[str, Any], tenant_id: str):
+        return json_resBody.get("data", {}), report_timestamp
+
+    def _report_health(self, health_data: dict[str, Any], tenant_id: str, timestamp: datetime):
         dimensions = {"tenant_id": tenant_id}
 
         values = health_data.get("values", {})
@@ -321,7 +332,12 @@ class ExtensionImpl(Extension):
                 continue
 
             try:
-                self.report_metric(metric_key, float(raw_value), dimensions=dimensions)
+                self.report_metric(
+                    metric_key,
+                    float(raw_value),
+                    dimensions=dimensions,
+                    timestamp=timestamp,
+                )
 
             except (TypeError, ValueError):
                 self.logger.warning("Non-numeric %s for tenant %s: %r", field, tenant_id, raw_value)

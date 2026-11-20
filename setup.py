@@ -4,7 +4,7 @@ from setuptools import find_packages, setup
 
 
 def find_version() -> str:
-    version = "0.0.2"
+    version = "0.1.0"
     extension_yaml_path = Path(__file__).parent / "extension" / "extension.yaml"
 
     try:
