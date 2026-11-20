@@ -13,10 +13,12 @@ _INSECURE_SSL_CONTEXT.check_hostname = False
 _INSECURE_SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
 _EXPIRY_BUFFER_SECONDS = 60
+REQUEST_TIMEOUT_SECONDS = 30
 
 TELEMETRY_OFFSET = 15
 HEALTH_OFFSET = 210
 HEALTH_REPORT_OFFSET = 50
+TOPN_LIMIT = 150
 LOGIN_PATH = "/rest/plat/smapp/v1/oauth/token"
 TOPN_PATH = "/rest/pmservice/v2/openapi/topn"
 HEALTH_PATH = "/rest/campuswlanqualityservice/v1/expmonitor/overview/rate"
@@ -81,7 +83,6 @@ class ExtensionImpl(Extension):
         except Exception as exc:
             self.logger.error("Error fetching/reporting telemetry for %s: %s", base_url, exc)
 
-
     def _login(self, base_url: str, username: str, password: str) -> tuple[str, int]:
 
         # Prepare request body
@@ -105,7 +106,7 @@ class ExtensionImpl(Extension):
 
         # Call Authentication Endpoint
         try:
-            with request.urlopen(req, timeout=30, context=_INSECURE_SSL_CONTEXT) as response:
+            with request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS, context=_INSECURE_SSL_CONTEXT) as response:
                 resBody = json.loads(response.read())
         except error.HTTPError as e:
             body = e.read().decode(errors="replace")
@@ -156,52 +157,13 @@ class ExtensionImpl(Extension):
     def _fetch_board_cpu_usage(
         self, base_url: str, access_session: str
     ) -> tuple[list[dict[str, Any]], datetime]:
-        now = datetime.now(timezone.utc)
-        begin = now - timedelta(minutes=TELEMETRY_OFFSET)
-
-        # 【Set Parameter】Condition parameter for TOPN endpoint
-        condition = {
-            "measureUnit": "dcn_board",
-            "measure": "dcn_board_cpu_usage",
-            "beginTime": int(begin.timestamp() * 1000),
-            "endTime": int(now.timestamp() * 1000),
-            "isAbnormal": False,
-            "limit": 150, 
-            "filters": {"id": ["/"], "level": [0], "dcn_filter_ne_name": ["HQ"],},
-            "supportOperate": [],
-        }
-
-        query_string = parse.urlencode({"condition": json.dumps(condition)})
-        full_url = f"{base_url}{TOPN_PATH}?{query_string}"
-
-        headers = {
-            "Accept": "application/json",
-            "X-Auth-Token": access_session,
-        }
-
-        req = request.Request(full_url, headers=headers, method="GET")
-
-        try:
-            with request.urlopen(req, timeout=30, context=_INSECURE_SSL_CONTEXT) as response:
-                resBody = response.read()
-        except error.HTTPError as e:
-            body = e.read().decode(errors="replace")
-            self.logger.error("TopN request HTTP %s: %s", e.code, body)
-            raise
-
-        json_resBody = json.loads(resBody)
-
-        if json_resBody.get("error_code") not in (0, "0"):
-            raise RuntimeError(f"CampusInsight API error: {json_resBody.get('error_msg')}")
-
-        resultData = json_resBody.get("resultData", [])
-
-        if len(resultData) >= condition["limit"]:
-            self.logger.warning(
-                "CampusInsight topN response for %s returned %d rows (limit=%d) — "
-                "results may be truncated if more boards exist",
-                base_url, len(resultData), condition["limit"],
-            )
+        resultData, begin = self._fetch_topn(
+            base_url,
+            access_session,
+            measure_unit="dcn_board",
+            measure="dcn_board_cpu_usage",
+            filters={"id": ["/"], "level": [0], "dcn_filter_ne_name": ["HQ"]},
+        )
 
         filtered_resultData = [
             row for row in resultData
@@ -210,13 +172,13 @@ class ExtensionImpl(Extension):
 
         self.logger.debug(
             "CampusInsight %s: %d/%d boards matches HQ+CSW/TSW filter",
-            base_url, len(filtered_resultData), len(resultData),
+            base_url, len(filtered_resultData), len(resultData)
         )
 
         self.logger.info(
             "CPU usage fetch succeeded for %s (%d rows)", f"{base_url}{TOPN_PATH}", len(filtered_resultData)
         )
-        
+
         return filtered_resultData, begin
 
     def _filter_device_name(self, name: str) -> bool:
@@ -341,6 +303,61 @@ class ExtensionImpl(Extension):
 
             except (TypeError, ValueError):
                 self.logger.warning("Non-numeric %s for tenant %s: %r", field, tenant_id, raw_value)
+
+    def _fetch_topn(
+        self, base_url: str, access_session: str,
+        measure_unit: str, measure: str, filters: dict[str, Any], limit: int = 150,
+    ) -> tuple[list[dict[str, Any]], datetime]:
+
+        """Call the CampusInsight topn endpoint. Returns the raw rows and the window start time."""
+        now = datetime.now(timezone.utc)
+        begin = now - timedelta(minutes = TELEMETRY_OFFSET)
+
+        # Set TopN endpoint condition parameters
+        condition = {
+            "measureUnit": measure_unit,
+            "measure": measure,
+            "beginTime": int(begin.timestamp() * 1000),
+            "endTime": int(now.timestamp() * 1000),
+            "isAbnormal": False,
+            "limit": limit,
+            "filters": filters,
+            "supportOperate": [],
+        }
+
+        query_string = parse.urlencode({"condition":json.dumps(condition)})
+
+        full_url = f"{base_url}{TOPN_PATH}?{query_string}"
+
+        headers = {
+            "Accept": "application/json",
+            "X-Auth-Token": access_session,
+        }
+
+        req = request.Request(full_url, headers=headers, method="GET")
+
+        try:
+            with request.urlopen(req, timeout=30, context=_INSECURE_SSL_CONTEXT) as response:
+                resBody = response.read()
+        except error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            self.logger.error("TopN request HTTP %s: %s", e.code, body)
+            raise
+
+        json_resBody = json.loads(resBody)
+
+        if json_resBody.get("error_code") not in (0, "0"):
+            raise RuntimeError(f"CampusInsight API error ({measure}): {json_resBody.get('error_msg')}")
+
+        resultData = json_resBody.get("resultData", [])
+
+        if len(resultData) >= limit:
+            self.logger.warning(
+                "CampusInsight topN response for %s (%s) returned %d rows (limit=%d) - results may be truncated if more rows exist",
+                base_url, measure, len(resultData), limit,
+            )
+
+        return resultData, begin
 
     def fastcheck(self):
         return Status(StatusValue.OK)
