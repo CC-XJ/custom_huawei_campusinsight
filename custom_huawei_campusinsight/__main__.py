@@ -68,25 +68,29 @@ class ExtensionImpl(Extension):
 
             # 【REPORT】CPU Usage metric (Average/Max)
             for row in resultData:
-                self._report_cpu(row, tenant_id, telemetry_timestamp)
+                self._report_cpu_metric(row, tenant_id, telemetry_timestamp)
 
         except Exception as exc:
             self.logger.error("Error fetching/reporting telemetry for %s: %s", base_url, exc)
 
-        # 【GET】Bandwidth Usage (Input/Output)
+        # 【GET】Interface metrics (bandwidth, packet drops, and byte counts)
         for measure, metric_key in (
             ("input_bandwidth_percent", "custom.huawei.campusinsight.interface.bandwidth.input.usage"),
             ("output_bandwidth_percent", "custom.huawei.campusinsight.interface.bandwidth.output.usage"),
+            ("send_drop_pkts_cnt", "custom.huawei.campusinsight.interface.packets.send.drop.count"),
+            ("recv_drop_pkts_cnt", "custom.huawei.campusinsight.interface.packets.receive.drop.count"),
+            ("dcn_port_port_send_byte", "custom.huawei.campusinsight.interface.bytes.sent"),
+            ("dcn_port_port_receive_byte", "custom.huawei.campusinsight.interface.bytes.received"),
         ):
             try:
-                rows, bandwidth_timestamp = self._fetch_bandwidth(base_url, access_session, measure)
+                rows, interface_timestamp = self._fetch_interface_metric(base_url, access_session, measure)
 
-                # 【REPORT】Bandwidth Usage (Input/Output)
+                # 【REPORT】Interface metric
                 for row in rows:
-                    self._report_bandwidth(row, tenant_id, bandwidth_timestamp, metric_key)
+                    self._report_interface_metric(row, tenant_id, interface_timestamp, metric_key)
             except Exception as exc:
                 self.logger.error(
-                    "Error fetching/reporting %s bandwidth for %s: %s", measure, base_url, exc
+                    "Error fetching/reporting %s interface metric for %s: %s", measure, base_url, exc
                 )
 
         # 【GET】Network Health (Total rate/Coverage/Capacity/Throughput)
@@ -258,7 +262,7 @@ class ExtensionImpl(Extension):
 
         return filtered_resultData, begin
 
-    def _fetch_bandwidth(
+    def _fetch_interface_metric(
         self, base_url: str, access_session: str, measure: str
     ) -> tuple[list[dict[str, Any]], datetime]:
         resultData, begin = self._fetch_topn(
@@ -280,13 +284,13 @@ class ExtensionImpl(Extension):
         )
 
         self.logger.info(
-            "Bandwidth fetch succeeded for %s (%s, %d rows)",
+            "Interface metric fetch succeeded for %s (%s, %d rows)",
             f"{base_url}{TOPN_PATH}", measure, len(filtered_resultData)
         )
 
         return filtered_resultData, begin
 
-    def _report_cpu(self, row: dict[str, Any], tenant_id: str, timestamp: datetime):
+    def _report_cpu_metric(self, row: dict[str, Any], tenant_id: str, timestamp: datetime):
         raw_id = row.get("id", "")
 
         if not raw_id:
@@ -328,7 +332,7 @@ class ExtensionImpl(Extension):
             except (TypeError, ValueError):
                 self.logger.warning("Non-numeric maximum for board %s: %r", raw_id, maximum)
 
-    def _report_bandwidth(
+    def _report_interface_metric(
         self, row: dict[str, Any], tenant_id: str, timestamp: datetime, metric_key: str
     ):
         interface_id = row.get("id")
