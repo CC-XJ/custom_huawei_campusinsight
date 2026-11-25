@@ -1,6 +1,6 @@
 # custom:com.cc.ext.huawei.campusinsight
 
-**Latest version:** 0.0.4
+**Latest version:** 0.1.1
 This extension is built using the Dynatrace Extension 2.0 Framework.
 This means it will benefit of additional assets that can help you browse through the data.
 

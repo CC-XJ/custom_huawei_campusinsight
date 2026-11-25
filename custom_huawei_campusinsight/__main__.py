@@ -43,7 +43,7 @@ class ExtensionImpl(Extension):
         username = endpoint.get("username", "").strip()
         password = endpoint.get("password", "").strip()
 
-        # 【Input Check】 Check for empty input fields
+        # 【CHECK】Sub-optimal input fields
         if not base_url:
             self.logger.warning("Skipping endpoint without a URL")
             return
@@ -54,7 +54,7 @@ class ExtensionImpl(Extension):
             self.logger.warning("Skipping endpoint %s without a username/password.", base_url)
             return
 
-        # 【Get Access Token】Call method to obtain access session token
+        # 【GET】Session Access Token
         try:
             access_session = self._get_session(base_url, username, password)
             
@@ -62,22 +62,38 @@ class ExtensionImpl(Extension):
             self.logger.error("Could not obtain session for %s: %s", base_url, exc)
             return
 
-        # 【Extract Telemetry】 Fetch Huawei iMaster CPU Usage (Telemetry)
+        # 【GET】CPU Usage (Average/Max)
         try:
             resultData, telemetry_timestamp = self._fetch_board_cpu_usage(base_url, access_session)
 
-            # 【Report Telemetry】Report fetched telemtry metrics to Dynatrace
+            # 【REPORT】CPU Usage metric (Average/Max)
             for row in resultData:
-                self._report_telemetry(row, tenant_id, telemetry_timestamp)
+                self._report_cpu(row, tenant_id, telemetry_timestamp)
 
         except Exception as exc:
             self.logger.error("Error fetching/reporting telemetry for %s: %s", base_url, exc)
 
-        # 【Extract Health】 Fetch Huawei iMaster Network Health
+        # 【GET】Bandwidth Usage (Input/Output)
+        for measure, metric_key in (
+            ("input_bandwidth_percent", "custom.huawei.campusinsight.interface.bandwidth.input.usage"),
+            ("output_bandwidth_percent", "custom.huawei.campusinsight.interface.bandwidth.output.usage"),
+        ):
+            try:
+                rows, bandwidth_timestamp = self._fetch_bandwidth(base_url, access_session, measure)
+
+                # 【REPORT】Bandwidth Usage (Input/Output)
+                for row in rows:
+                    self._report_bandwidth(row, tenant_id, bandwidth_timestamp, metric_key)
+            except Exception as exc:
+                self.logger.error(
+                    "Error fetching/reporting %s bandwidth for %s: %s", measure, base_url, exc
+                )
+
+        # 【GET】Network Health (Total rate/Coverage/Capacity/Throughput)
         try:
             health_data, health_timestamp = self._fetch_network_health(base_url, access_session, tenant_id)
 
-            # 【Report Health】Report fetched network health metrics to Dynatrace
+            # 【REPORT】Network Health metric (Total rate/Coverage/Capacity/Throughput)
             self._report_health(health_data, tenant_id, health_timestamp)
 
         except Exception as exc:
@@ -154,6 +170,67 @@ class ExtensionImpl(Extension):
         
         return access_session
 
+    def _fetch_topn(
+        self, base_url: str, access_session: str,
+        measure_unit: str, measure: str, filters: dict[str, Any], limit: int = 150,
+    ) -> tuple[list[dict[str, Any]], datetime]:
+
+        """Call the CampusInsight topn endpoint. Returns the raw rows and the window start time."""
+        now = datetime.now(timezone.utc)
+        begin = now - timedelta(minutes = TELEMETRY_OFFSET)
+
+        # Set TopN endpoint condition parameters
+        condition = {
+            "measureUnit": measure_unit,
+            "measure": measure,
+            "beginTime": int(begin.timestamp() * 1000),
+            "endTime": int(now.timestamp() * 1000),
+            "isAbnormal": False,
+            "limit": limit,
+            "filters": filters,
+            "supportOperate": [],
+        }
+
+        query_string = parse.urlencode({"condition":json.dumps(condition)})
+
+        full_url = f"{base_url}{TOPN_PATH}?{query_string}"
+
+        headers = {
+            "Accept": "application/json",
+            "X-Auth-Token": access_session,
+        }
+
+        req = request.Request(full_url, headers=headers, method="GET")
+
+        try:
+            with request.urlopen(req, timeout=30, context=_INSECURE_SSL_CONTEXT) as response:
+                resBody = response.read()
+        except error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            self.logger.error("TopN request HTTP %s: %s", e.code, body)
+            raise
+
+        json_resBody = json.loads(resBody)
+
+        if json_resBody.get("error_code") not in (0, "0"):
+            raise RuntimeError(f"CampusInsight API error ({measure}): {json_resBody.get('error_msg')}")
+
+        resultData = json_resBody.get("resultData", [])
+
+        if len(resultData) >= limit:
+            self.logger.warning(
+                "CampusInsight topN response for %s (%s) returned %d rows (limit=%d) - results may be truncated if more rows exist",
+                base_url, measure, len(resultData), limit,
+            )
+
+        return resultData, begin
+
+    def _filter_device_name(self, name: str) -> bool:
+        """Return True if the device is an HQ core/top switch (CSW or TSW)."""
+        name = name.upper()
+
+        return "HQ" in name and ("CSW" in name or "TSW" in name)
+
     def _fetch_board_cpu_usage(
         self, base_url: str, access_session: str
     ) -> tuple[list[dict[str, Any]], datetime]:
@@ -171,7 +248,7 @@ class ExtensionImpl(Extension):
         ]
 
         self.logger.debug(
-            "CampusInsight %s: %d/%d boards matches HQ+CSW/TSW filter",
+            "CampusInsight %s: %d/%d boards matches filter",
             base_url, len(filtered_resultData), len(resultData)
         )
 
@@ -181,13 +258,35 @@ class ExtensionImpl(Extension):
 
         return filtered_resultData, begin
 
-    def _filter_device_name(self, name: str) -> bool:
-        """Return True if the device is an HQ core/top switch (CSW or TSW)."""
-        name = name.upper()
+    def _fetch_bandwidth(
+        self, base_url: str, access_session: str, measure: str
+    ) -> tuple[list[dict[str, Any]], datetime]:
+        resultData, begin = self._fetch_topn(
+            base_url,
+            access_session,
+            measure_unit="dcn_interface",
+            measure=measure,
+            filters={"id": ["/"], "level": [0], "dcn_filter_ne_name": ["HQ"]},
+        )
 
-        return "HQ" in name and ("CSW" in name or "TSW" in name)
+        filtered_resultData = [
+            row for row in resultData
+            if self._filter_device_name(row.get("dcn_port_ne_name", ""))
+        ]
 
-    def _report_telemetry(self, row: dict[str, Any], tenant_id: str, timestamp: datetime):
+        self.logger.debug(
+            "CampusInsight %s (%s): %d/%d interfaces matches filter",
+            base_url, measure, len(filtered_resultData), len(resultData)
+        )
+
+        self.logger.info(
+            "Bandwidth fetch succeeded for %s (%s, %d rows)",
+            f"{base_url}{TOPN_PATH}", measure, len(filtered_resultData)
+        )
+
+        return filtered_resultData, begin
+
+    def _report_cpu(self, row: dict[str, Any], tenant_id: str, timestamp: datetime):
         raw_id = row.get("id", "")
 
         if not raw_id:
@@ -228,6 +327,33 @@ class ExtensionImpl(Extension):
                 )
             except (TypeError, ValueError):
                 self.logger.warning("Non-numeric maximum for board %s: %r", raw_id, maximum)
+
+    def _report_bandwidth(
+        self, row: dict[str, Any], tenant_id: str, timestamp: datetime, metric_key: str
+    ):
+        interface_id = row.get("id")
+        if not interface_id:
+            self.logger.warning("Skipping interface with missing id for tenant %s: %r", tenant_id, row)
+            return
+
+        raw_value = row.get("meas_value")
+        if raw_value is None:
+            self.logger.warning("Skipping interface %s with missing meas_value", interface_id)
+            return
+
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            self.logger.warning("Non-numeric meas_value for interface %s: %r", interface_id, raw_value)
+            return
+
+        dimensions = {
+            "tenant_id": tenant_id,
+            "device_name": row.get("dcn_port_ne_name", "unknown"),
+            "device_ip": row.get("dcn_port_ne_ip", "unknown"),
+            "interface_name": row.get("dcn_port_if_name", "unknown"),
+        }
+        self.report_metric(metric_key, value, dimensions=dimensions, timestamp=timestamp)
 
     def _fetch_network_health(
         self, base_url: str, access_session: str, tenant_id: str
@@ -303,61 +429,6 @@ class ExtensionImpl(Extension):
 
             except (TypeError, ValueError):
                 self.logger.warning("Non-numeric %s for tenant %s: %r", field, tenant_id, raw_value)
-
-    def _fetch_topn(
-        self, base_url: str, access_session: str,
-        measure_unit: str, measure: str, filters: dict[str, Any], limit: int = 150,
-    ) -> tuple[list[dict[str, Any]], datetime]:
-
-        """Call the CampusInsight topn endpoint. Returns the raw rows and the window start time."""
-        now = datetime.now(timezone.utc)
-        begin = now - timedelta(minutes = TELEMETRY_OFFSET)
-
-        # Set TopN endpoint condition parameters
-        condition = {
-            "measureUnit": measure_unit,
-            "measure": measure,
-            "beginTime": int(begin.timestamp() * 1000),
-            "endTime": int(now.timestamp() * 1000),
-            "isAbnormal": False,
-            "limit": limit,
-            "filters": filters,
-            "supportOperate": [],
-        }
-
-        query_string = parse.urlencode({"condition":json.dumps(condition)})
-
-        full_url = f"{base_url}{TOPN_PATH}?{query_string}"
-
-        headers = {
-            "Accept": "application/json",
-            "X-Auth-Token": access_session,
-        }
-
-        req = request.Request(full_url, headers=headers, method="GET")
-
-        try:
-            with request.urlopen(req, timeout=30, context=_INSECURE_SSL_CONTEXT) as response:
-                resBody = response.read()
-        except error.HTTPError as e:
-            body = e.read().decode(errors="replace")
-            self.logger.error("TopN request HTTP %s: %s", e.code, body)
-            raise
-
-        json_resBody = json.loads(resBody)
-
-        if json_resBody.get("error_code") not in (0, "0"):
-            raise RuntimeError(f"CampusInsight API error ({measure}): {json_resBody.get('error_msg')}")
-
-        resultData = json_resBody.get("resultData", [])
-
-        if len(resultData) >= limit:
-            self.logger.warning(
-                "CampusInsight topN response for %s (%s) returned %d rows (limit=%d) - results may be truncated if more rows exist",
-                base_url, measure, len(resultData), limit,
-            )
-
-        return resultData, begin
 
     def fastcheck(self):
         return Status(StatusValue.OK)

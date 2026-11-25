@@ -1,5 +1,5 @@
 name: custom:com.cc.ext.huawei.campusinsight
-version: 0.1.0
+version: 0.1.1
 minDynatraceVersion: 1.343.0
 author:
   name: Core Consulting
@@ -18,6 +18,11 @@ python:
       metrics:
         - key: custom.huawei.campusinsight.board.cpu.usage
         - key: custom.huawei.campusinsight.board.cpu.usage.max
+
+    - featureSet: network_interface
+      metrics:
+        - key: custom.huawei.campusinsight.interface.bandwidth.input.usage
+        - key: custom.huawei.campusinsight.interface.bandwidth.output.usage
 
     - featureSet: network_health
       metrics:
@@ -60,7 +65,37 @@ metrics:
           displayName: Device IP
         - key: board_id
           displayName: Board ID
-  
+
+  - key: custom.huawei.campusinsight.interface.bandwidth.input.usage
+    metadata:
+      displayName: Interface Input Bandwidth Usage
+      description: Inbound bandwidth utilization of Huawei device interfaces, returned as meas_value for the input_bandwidth_percent measure of the CampusInsight topn API.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+        - key: device_name
+          displayName: Device Name
+        - key: device_ip
+          displayName: Device IP
+        - key: interface_name
+          displayName: Interface Name
+
+  - key: custom.huawei.campusinsight.interface.bandwidth.output.usage
+    metadata:
+      displayName: Interface Output Bandwidth Usage
+      description: Outbound bandwidth utilization of Huawei device interfaces, returned as meas_value for the output_bandwidth_percent measure of the CampusInsight topn API.
+      unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+        - key: device_name
+          displayName: Device Name
+        - key: device_ip
+          displayName: Device IP
+        - key: interface_name
+          displayName: Interface Name
+
   - key: custom.huawei.campusinsight.health.total_rate
     metadata:
       displayName: Network Health Total Rate
@@ -132,6 +167,7 @@ metrics:
       dimensions:
         - key: tenant_id
           displayName: Tenant ID
+
 
 topology:
   types:
