@@ -1,5 +1,5 @@
 name: custom:com.cc.ext.huawei.campusinsight
-version: 0.1.1
+version: 0.1.2
 minDynatraceVersion: 1.343.0
 author:
   name: Core Consulting
@@ -23,6 +23,10 @@ python:
       metrics:
         - key: custom.huawei.campusinsight.interface.bandwidth.input.usage
         - key: custom.huawei.campusinsight.interface.bandwidth.output.usage
+        - key: custom.huawei.campusinsight.interface.packets.send.drop.count
+        - key: custom.huawei.campusinsight.interface.packets.receive.drop.count
+        - key: custom.huawei.campusinsight.interface.bytes.sent
+        - key: custom.huawei.campusinsight.interface.bytes.received
 
     - featureSet: network_health
       metrics:
@@ -86,6 +90,66 @@ metrics:
       displayName: Interface Output Bandwidth Usage
       description: Outbound bandwidth utilization of Huawei device interfaces, returned as meas_value for the output_bandwidth_percent measure of the CampusInsight topn API.
       unit: Percent
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+        - key: device_name
+          displayName: Device Name
+        - key: device_ip
+          displayName: Device IP
+        - key: interface_name
+          displayName: Interface Name
+
+  - key: custom.huawei.campusinsight.interface.packets.send.drop.count
+    metadata:
+      displayName: Interface Send Drop Packets
+      description: Number of packets dropped on send for a Huawei device interface, returned as meas_value for the send_drop_pkts_cnt measure of the CampusInsight topn API.
+      unit: Count
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+        - key: device_name
+          displayName: Device Name
+        - key: device_ip
+          displayName: Device IP
+        - key: interface_name
+          displayName: Interface Name
+
+  - key: custom.huawei.campusinsight.interface.packets.receive.drop.count
+    metadata:
+      displayName: Interface Receive Drop Packets
+      description: Number of packets dropped on receive for a Huawei device interface, returned as meas_value for the recv_drop_pkts_cnt measure of the CampusInsight topn API.
+      unit: Count
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+        - key: device_name
+          displayName: Device Name
+        - key: device_ip
+          displayName: Device IP
+        - key: interface_name
+          displayName: Interface Name
+
+  - key: custom.huawei.campusinsight.interface.bytes.sent
+    metadata:
+      displayName: Interface Bytes Sent
+      description: Number of bytes sent by a Huawei device interface, returned as meas_value for the dcn_port_port_send_byte measure of the CampusInsight topn API.
+      unit: Byte
+      dimensions:
+        - key: tenant_id
+          displayName: Tenant ID
+        - key: device_name
+          displayName: Device Name
+        - key: device_ip
+          displayName: Device IP
+        - key: interface_name
+          displayName: Interface Name
+
+  - key: custom.huawei.campusinsight.interface.bytes.received
+    metadata:
+      displayName: Interface Bytes Received
+      description: Number of bytes received by a Huawei device interface, returned as meas_value for the dcn_port_port_receive_byte measure of the CampusInsight topn API.
+      unit: Byte
       dimensions:
         - key: tenant_id
           displayName: Tenant ID
